@@ -45,6 +45,11 @@ const SERVICE_ENABLE_VALUE: [u8; 2] = [0x01, 0x00];
 /// deliberately generous; replies are matched by cmd + subcmd so a late one
 /// cannot be mistaken for the next command's.
 const CMD_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Deadline for connecting and for service discovery. Generous — a cold
+/// controller is not quick — but finite, because neither call is interruptible
+/// and an unbounded one wedges the process against Ctrl-C.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const FLASH_PAYLOAD_OFFSET: usize = 0x10;
 
 /// Nintendo's Bluetooth SIG company identifier, as it appears in the
@@ -107,10 +112,17 @@ impl BleTransport {
         };
         let _ = central.stop_scan().await;
 
-        peripheral.connect().await.context("connecting")?;
-        peripheral
-            .discover_services()
+        // Both of these can hang indefinitely against a controller that
+        // advertises but will not finish the link — CoreBluetooth simply never
+        // calls back. Unbounded, they swallow Ctrl-C and the process needs
+        // SIGKILL, so each gets a deadline of its own.
+        tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect())
             .await
+            .map_err(|_| anyhow!("timed out connecting after {CONNECT_TIMEOUT:?}"))?
+            .context("connecting")?;
+        tokio::time::timeout(CONNECT_TIMEOUT, peripheral.discover_services())
+            .await
+            .map_err(|_| anyhow!("timed out discovering services after {CONNECT_TIMEOUT:?}"))?
             .context("discovering GATT services")?;
 
         let find = |raw: &str| -> Option<btleplug::api::Characteristic> {

@@ -5,8 +5,8 @@ A low-latency macOS driver for the **Nintendo Switch Online GameCube controller*
 factory calibration stored in its flash, and feeds Dolphin through a named pipe.
 
 Measured **250 Hz** sustained over USB on an Apple Silicon Mac — twice the rate
-the controller's HID interface advertises, and about 3.5× what the Bluetooth
-link can deliver.
+the controller's HID interface advertises, and about 7.5× the 33 Hz the
+Bluetooth link was measured delivering.
 
 ## Why this exists
 
@@ -14,6 +14,10 @@ The NSO GameCube controller does not present usable input as plain HID. Its
 buttons, analog sticks and analog triggers only stream after a proprietary
 initialisation handshake, and the raw axis values are meaningless until the
 per-unit calibration is read out of the controller's SPI flash.
+
+macOS still enumerates it as a gamepad, and Dolphin still offers it as an SDL
+device — it just does not work. See
+[Why not just use Dolphin's SDL backend?](#why-not-just-use-dolphins-sdl-backend)
 
 ## Quick start
 
@@ -61,6 +65,17 @@ your bindings persist with it.
 ./start.sh      # Ctrl-C to stop, or ./stop.sh from another terminal
 ```
 
+Or use the menu bar app, if you would rather not keep a terminal open:
+
+```sh
+./ui/build.sh                                     # builds it
+open "ui/build/NSO GameCube Controller.app"
+```
+
+A game controller icon appears in the menu bar — filled while the driver is
+running, hollow when it is not. The menu has Start/Stop, a transport picker and
+a window with the driver's live log. See [`ui/`](ui/) for how it works.
+
 Start Dolphin whenever you like. Neither script launches or closes Dolphin. The
 driver does have to be running the whole time you play, though — it is what
 reads the controller and feeds the pipe, so without it Dolphin sees a controller
@@ -68,13 +83,6 @@ that is configured but silent.
 
 `start.sh` passes its arguments through, so `./start.sh --transport ble` and
 every flag below work through it.
-
-Then in Dolphin: **Controllers → GameCube Port 1 → Configure**, set
-**Device** to `Pipe/0/gcc1`, and bind the inputs.
-
-> Dolphin only scans its `Pipes/` directory at startup, so start this driver
-> **before** Dolphin. The driver prints `Dolphin attached` when Dolphin opens
-> the pipe, which is the quickest way to confirm the wiring.
 
 ## Usage
 
@@ -179,19 +187,49 @@ GATT services: commands to `649d4ac9-…-f005` (write **without** response — t
 characteristic advertises both modes but only this one works), replies on
 `c765a961-…-836a`, input reports on `ab7de9be-…-7fd2`.
 
-**Status: implemented but not verified on hardware.** It was written against the
-protocol references below rather than a live link. One known gap: Nintendo's LTK
-pairing exchange (`cmd 0x15`) is **not** implemented, so the controller will not
-remember this Mac — expect to hold sync each time.
+**Status: verified on hardware.** Connects, reads the same calibration the cable
+reports, and drives Dolphin. Two known gaps:
+
+- Nintendo's LTK pairing exchange (`cmd 0x15`) is **not** implemented, so the
+  controller will not remember this Mac — expect to hold sync each time.
+- Four init commands (`0x0a/0x08`, `0x01/0x0c`, `0x01/0x01`, `0x08/0x02`) get no
+  reply over BLE, though they are answered over USB. Input still streams, so
+  these are not fatal — but see below, because they are the most likely
+  explanation for the rate.
 
 ### Bluetooth latency
 
-Wireless input latency is bounded by the **connection interval**: a report can
-only reach the host on a connection event, so the interval *is* the worst case.
-macOS hands this controller 15 ms — about 67 Hz, which is what the link was
-observed delivering. That is Apple's default for a generic GATT accessory, and
-this controller cannot do better by default because it does not expose HID over
-GATT, so it never qualifies for `bluetoothd`'s LE-HID fast path.
+**Measured: 33 Hz, a 30 ms gap between reports.** Over 1207 reports:
+
+```
+median 30.00 ms   p95 31.85 ms   p99 59.94 ms   max 90.64 ms
+~30 ms   30 ms interval          97.8% ███████████████████████████████
+```
+
+That is roughly 15 ms of mean added latency against the cable's 2 ms — a quarter
+of a frame at 60 fps, and the reason USB is still the recommended transport.
+
+Wireless input latency is normally bounded by the **connection interval**: a
+report can only reach the host on a connection event, so the interval *is* the
+worst case. That framing is what `--ble-latency` was built to attack, and on
+this controller **it does not work**:
+
+| | median | p95 | 30 ms bin |
+|---|---|---|---|
+| `--ble-latency system` | 30.00 ms | 31.85 ms | 97.8% |
+| `--ble-latency low` | 30.04 ms | 32.06 ms | 97.1% |
+
+The SPI call is *accepted* — the driver reports `2 call(s) accepted`, no
+exception — and changes nothing measurable. The flag is left in place because
+the mechanism is sound and costs nothing, but it currently buys zero.
+
+The likely reason is that 30 ms is **not** the connection interval at all, but
+the rate the controller chooses to send at. The evidence points that way: p99 sits
+at 60 ms and max at 90 ms, exact multiples of 30, which is what a missed report
+looks like rather than a renegotiated link. If the controller is producing at
+30 ms, no connection-interval change can help — and the four unanswered init
+commands are the obvious suspect for why it might be in a reduced-rate mode.
+Chasing those acks is a better lead than chasing the interval.
 
 `--ble-latency` asks for something quicker through
 `-[CBCentralManager setDesiredConnectionLatency:forPeripheral:]`, the
@@ -214,12 +252,25 @@ its own telemetry the same way (`Interval_Bin_00_7point5ms`,
 real on macOS and not merely permitted by the spec. It works over USB too, where
 it measures poll spacing, which is the comparison worth having:
 
-| Path | Interval | Mean added latency |
-|---|---|---|
-| USB @ 250 Hz | 4 ms poll | ~2 ms |
-| BLE, macOS default | 15 ms | ~7.5 ms |
-| BLE, `--ble-latency low` | measure it | — |
-| BLE, protocol floor | 7.5 ms | ~3.75 ms |
+| Path | Interval | Mean added latency | |
+|---|---|---|---|
+| USB @ 250 Hz | 4 ms poll | ~2 ms | measured |
+| BLE, macOS default | 30 ms | ~15 ms | measured |
+| BLE, `--ble-latency low` | 30 ms | ~15 ms | measured — no change |
+| BLE, protocol floor | 7.5 ms | ~3.75 ms | not reached |
+
+The USB row is measured, not nominal — `--histogram` over 2916 reports on an
+Apple Silicon Mac:
+
+```
+median 4.00 ms   p95 4.25 ms   p99 4.59 ms   max 6.43 ms
+~4 ms   250 Hz — the vendor bulk path        99.6% ████████████████████████
+```
+
+Worth stating plainly because the comparable macOS tool documents 125 Hz as the
+platform ceiling ("macOS does not provide a user-accessible way to override USB
+HID polling rates"). That ceiling applies to the *HID* interface. Reading input
+while driving the vendor interface gets twice the rate.
 
 **7.5 ms is a hard BLE floor**, so ~3.75 ms mean is the best any wireless path
 can do. USB remains lower latency and is still the recommended transport.
@@ -239,6 +290,33 @@ members. Verified on macOS 26.5:
 
 The Dolphin pipe needs no entitlement, no code signing and no privacy prompt,
 and it is a shorter path from wire to emulator.
+
+## Why not just use Dolphin's SDL backend?
+
+Because it looks like it works and then does not. Verified on macOS 26.5 with
+Dolphin 2506a, controller freshly replugged so nothing had initialised it:
+
+| | |
+|---|---|
+| macOS enumerates it | yes — `Nintendo GameCube Controller`, usage page 1, usage 5 (Gamepad) |
+| Dolphin lists it | yes — appears as an `SDL/0/…` device |
+| Buttons respond | **no** |
+
+SDL [does have a Switch 2 driver](https://github.com/libsdl-org/SDL/pull/13327),
+but it is USB-only and needs SDL built with libusb, because the initialisation
+handshake runs on the vendor interface and the HID interface alone will not do.
+Dolphin's `Externals/SDL/CMakeLists.txt` never enables it. So the device
+enumerates as a gamepad, Dolphin offers it, and nothing streams — which is a
+worse failure than not appearing at all, because it looks like a binding problem.
+
+That is the whole reason this exists. Two other projects overlap:
+
+- [RyanCopley/NSO-GameCube-Controller-Pairing-App](https://github.com/RyanCopley/NSO-GameCube-Controller-Pairing-App)
+  — Python, cross-platform, also does USB, BLE and Dolphin pipes on macOS. Its
+  own docs put macOS at 125 Hz over USB and 15–30 ms over BLE.
+- [loserkidsblink/nsogcd](https://github.com/loserkidsblink/nsogcd) — Linux only.
+  It drives the Bluetooth radio directly, which is possible there and, as the
+  next section shows, is not possible here.
 
 ## Why not set the connection interval directly?
 

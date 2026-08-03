@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use futures::StreamExt;
 
-use latency::Histogram;
+use latency::{Histogram, Link};
 use output::DolphinPipe;
 use transport::ble_latency::{self, Latency};
 use transport::usb::Poll;
@@ -174,7 +174,7 @@ fn run_usb(args: &Args, running: &AtomicBool) -> Result<()> {
 
     let mut sink = make_sink(args)?;
     let mut meter = Meter::new(args.stats);
-    let mut hist = Histogram::new(args.histogram);
+    let mut hist = Histogram::new(args.histogram, Link::Wired);
     let mut attached = false;
     let mut unknown = 0u64;
 
@@ -253,7 +253,7 @@ fn run_ble(args: &Args, running: &AtomicBool) -> Result<()> {
 
         let mut sink = make_sink(args)?;
         let mut meter = Meter::new(args.stats);
-        let mut hist = Histogram::new(args.histogram);
+        let mut hist = Histogram::new(args.histogram, Link::Wireless);
         let mut attached = false;
         let mut reports = Box::pin(ble.reports().await?);
 
