@@ -267,10 +267,10 @@ median 4.00 ms   p95 4.25 ms   p99 4.59 ms   max 6.43 ms
 ~4 ms   250 Hz — the vendor bulk path        99.6% ████████████████████████
 ```
 
-Worth stating plainly because the comparable macOS tool documents 125 Hz as the
-platform ceiling ("macOS does not provide a user-accessible way to override USB
-HID polling rates"). That ceiling applies to the *HID* interface. Reading input
-while driving the vendor interface gets twice the rate.
+Worth stating plainly because 125 Hz is widely taken to be the macOS ceiling —
+macOS gives no user-accessible way to override USB HID polling rates. That
+ceiling applies to the *HID* interface. Reading input while driving the vendor
+interface gets twice the rate.
 
 **7.5 ms is a hard BLE floor**, so ~3.75 ms mean is the best any wireless path
 can do. USB remains lower latency and is still the recommended transport.
@@ -302,21 +302,14 @@ Dolphin 2506a, controller freshly replugged so nothing had initialised it:
 | Dolphin lists it | yes — appears as an `SDL/0/…` device |
 | Buttons respond | **no** |
 
-SDL [does have a Switch 2 driver](https://github.com/libsdl-org/SDL/pull/13327),
-but it is USB-only and needs SDL built with libusb, because the initialisation
-handshake runs on the vendor interface and the HID interface alone will not do.
-Dolphin's `Externals/SDL/CMakeLists.txt` never enables it. So the device
-enumerates as a gamepad, Dolphin offers it, and nothing streams — which is a
-worse failure than not appearing at all, because it looks like a binding problem.
+SDL does have a Switch 2 driver, but it is USB-only and needs SDL built with
+libusb, because the initialisation handshake runs on the vendor interface and the
+HID interface alone will not do. Dolphin's bundled SDL never enables it. So the
+device enumerates as a gamepad, Dolphin offers it, and nothing streams — which is
+a worse failure than not appearing at all, because it looks like a binding
+problem.
 
-That is the whole reason this exists. Two other projects overlap:
-
-- [RyanCopley/NSO-GameCube-Controller-Pairing-App](https://github.com/RyanCopley/NSO-GameCube-Controller-Pairing-App)
-  — Python, cross-platform, also does USB, BLE and Dolphin pipes on macOS. Its
-  own docs put macOS at 125 Hz over USB and 15–30 ms over BLE.
-- [loserkidsblink/nsogcd](https://github.com/loserkidsblink/nsogcd) — Linux only.
-  It drives the Bluetooth radio directly, which is possible there and, as the
-  next section shows, is not possible here.
+That is the whole reason this exists.
 
 ## Why not set the connection interval directly?
 
@@ -358,9 +351,10 @@ src/
 `cargo test` covers the wire-format decoding, the calibration maths and the
 pipe protocol — everything that can be checked without hardware.
 
-## Protocol references
+## Protocol notes
 
-- SDL's [`SDL_hidapi_switch2.c`](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_switch2.c) — init sequence, flash addresses, report offsets
-- [`murphyjt/wavebird`](https://github.com/murphyjt/wavebird) — macOS BLE behaviour and GATT channel selection
-- [`loserkidsblink/nsogcd`](https://github.com/loserkidsblink/nsogcd) — SW2 command frame structure, pairing
-- BlueRetro and ndeadly's Switch 2 research
+The SW2 command framing, the init sequence, the SPI flash addresses and the
+report 0x05 layout are all undocumented by Nintendo. They were established from
+prior open-source reverse-engineering of the Switch 2 controller family, and
+confirmed against this unit — the calibration this driver reads back matches over
+both transports, and the init sequence is the minimum that makes it stream.

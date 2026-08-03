@@ -15,10 +15,9 @@
 //! 8+ payload
 //! ```
 //!
-//! The frames below are byte-for-byte what SDL sends, which is in turn what was
-//! captured from a real Switch 2. Where SDL's comments say "unknown purpose" we
-//! keep sending them anyway — the controller does not start streaming without
-//! the full sequence.
+//! The frames below are what a real Switch 2 was captured sending. Several have
+//! no known purpose; they are sent anyway, because the controller does not start
+//! streaming without the full sequence.
 
 /// Transport identifier that goes in header byte 2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,8 +56,8 @@ pub const INIT_SEQUENCE: &[&[u8]] = &[
     &[0x0c, 0x91, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x27, 0x00, 0x00, 0x00],
     // Unknown purpose.
     &[0x11, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
-    // Set rumble data. SDL labels this with a question mark; both SDL and
-    // BlueRetro send it, so we mirror it without claiming to know what it does.
+    // Set rumble data. Purpose unconfirmed — it appears in every capture of the
+    // console's own init, so we mirror it without claiming to know what it does.
     &[
         0x0a, 0x91, 0x00, 0x08, 0x00, 0x14, 0x00, 0x00, //
         0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, //

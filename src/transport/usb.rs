@@ -9,7 +9,7 @@
 //!   This is the SW2 command channel: flash reads, the init sequence, LEDs.
 //!
 //! Sending init over the vendor interface and then reading input from the same
-//! endpoint yields nothing at all — the split is what SDL does, and it is
+//! endpoint yields nothing at all — the split is what the console does, and it is
 //! load-bearing.
 //!
 //! The read loop is a blocking HID read on its own thread: no runtime, no

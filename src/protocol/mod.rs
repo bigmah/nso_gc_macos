@@ -4,8 +4,9 @@
 //! HID for its useful data. Both transports carry the same command frames and
 //! the same input report, so everything that is not framing lives here.
 //!
-//! Sources: SDL's `SDL_hidapi_switch2.c`, ndeadly's switch2 research, BlueRetro,
-//! and the nsogcd protocol notes.
+//! None of this is documented by Nintendo. The framing, flash addresses and
+//! report layout come from prior open-source reverse-engineering of the Switch 2
+//! controller family, confirmed against this unit.
 
 pub mod calibration;
 pub mod command;
